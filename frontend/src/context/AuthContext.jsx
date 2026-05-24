@@ -1,5 +1,19 @@
 import { createContext, useContext, useState, useEffect } from "react";
-import api from "../services/api";
+import {
+  fetchCurrentUser,
+  loginUser,
+  logoutUser,
+  requestForgotPasswordOtp as requestForgotPasswordOtpService,
+  requestSignupOtp as requestSignupOtpService,
+  resetPassword as resetPasswordService,
+  verifySignupOtp as verifySignupOtpService,
+} from "../services/authService";
+import {
+  clearAuthStorage,
+  getAccessToken,
+  getRefreshToken,
+  setAuthStorage,
+} from "../services/tokenService";
 
 const AuthContext = createContext();
 
@@ -7,15 +21,13 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // On app load, check if user is already logged in
   useEffect(() => {
-    const token = localStorage.getItem("token");
+    const token = getAccessToken();
     if (token) {
-      api
-        .get("/auth/me")
+      fetchCurrentUser()
         .then((res) => setUser(res.data))
         .catch(() => {
-          localStorage.removeItem("token");
+          clearAuthStorage();
           setUser(null);
         })
         .finally(() => setLoading(false));
@@ -24,31 +36,72 @@ export const AuthProvider = ({ children }) => {
     }
   }, []);
 
-  const register = async (name, email, password) => {
-    const res = await api.post("/auth/register", { name, email, password });
-    localStorage.setItem("token", res.data.token);
-    setUser(res.data);
-    return res.data;
+  const storeAuth = (payload) => {
+    setAuthStorage({
+      accessToken: payload.accessToken,
+      refreshToken: payload.refreshToken,
+    });
+    setUser(payload.user);
   };
 
-  const login = async (email, password) => {
-    const res = await api.post("/auth/login", { email, password });
-    localStorage.setItem("token", res.data.token);
-    setUser(res.data);
-    return res.data;
+  const requestSignupOtp = async (payload) => {
+    const response = await requestSignupOtpService(payload);
+    return response.data;
   };
 
-  const logout = () => {
-    localStorage.removeItem("token");
+  const verifySignupOtp = async (payload) => {
+    const response = await verifySignupOtpService(payload);
+    storeAuth(response.data);
+    return response.data;
+  };
+
+  const login = async (payload) => {
+    const response = await loginUser(payload);
+    storeAuth(response.data);
+    return response.data;
+  };
+
+  const requestForgotPasswordOtp = async (payload) => {
+    const response = await requestForgotPasswordOtpService(payload);
+    return response.data;
+  };
+
+  const resetPassword = async (payload) => {
+    const response = await resetPasswordService(payload);
+    storeAuth(response.data);
+    return response.data;
+  };
+
+  const logout = async () => {
+    const refreshToken = getRefreshToken();
+    if (refreshToken) {
+      try {
+        await logoutUser({ refreshToken });
+      } catch (error) {
+        console.error("Logout request failed", error);
+      }
+    }
+
+    clearAuthStorage();
     setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, register, login, logout }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        requestSignupOtp,
+        verifySignupOtp,
+        login,
+        requestForgotPasswordOtp,
+        resetPassword,
+        logout,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
 };
 
-// Custom hook for easy access
 export const useAuth = () => useContext(AuthContext);
